@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { UserButton } from '@clerk/nextjs'
+import { UserButton, useUser } from '@clerk/nextjs'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard,
@@ -24,6 +24,7 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { user } = useUser()
 
   return (
     <div className="flex w-64 flex-col border-r bg-white">
@@ -63,10 +64,10 @@ export function Sidebar() {
           <UserButton afterSignOutUrl="/" />
           <div className="flex-1 min-w-0">
             <p className="truncate text-sm font-medium text-gray-700">
-              Admin
+              {user?.fullName || user?.firstName || 'User'}
             </p>
             <p className="truncate text-xs text-gray-500">
-              Manage your business
+              {user?.primaryEmailAddress?.emailAddress || ''}
             </p>
           </div>
         </div>
