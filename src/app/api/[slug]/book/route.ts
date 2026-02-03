@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import {
   getBusinessBySlug,
   getServiceById,
+  getStaffById,
   getOrCreateCustomer,
   createBooking,
 } from '@/lib/db/queries'
 import { isSlotAvailable } from '@/lib/availability'
+import { sendEmail } from '@/lib/email'
+import { bookingConfirmationEmail, bookingNotificationEmail } from '@/lib/email-templates'
 
 export async function POST(
   request: NextRequest,
@@ -84,6 +87,13 @@ export async function POST(
     // Calculate end time
     const endsAt = new Date(slotStart.getTime() + service.durationMinutes * 60 * 1000)
 
+    // Get staff name if assigned
+    let staffName: string | undefined
+    if (staffId) {
+      const staffMember = await getStaffById(staffId)
+      staffName = staffMember?.name
+    }
+
     // Create booking
     const booking = await createBooking({
       businessId: business.id,
@@ -97,8 +107,47 @@ export async function POST(
       source: 'web',
     })
 
-    // TODO: Trigger n8n webhook for notifications
-    // await triggerWebhook('booking-created', { bookingId: booking.id })
+    // Send confirmation email to customer
+    const emailData = {
+      customerName,
+      customerEmail,
+      serviceName: service.name,
+      staffName,
+      businessName: business.name,
+      startsAt: slotStart,
+      endsAt,
+      confirmationToken: booking.confirmationToken || booking.id,
+      notes,
+      price: service.price ? parseFloat(service.price) : undefined,
+      currency: business.currency || 'EUR',
+    }
+
+    try {
+      const confirmationEmail = bookingConfirmationEmail(emailData)
+      await sendEmail({
+        to: customerEmail,
+        subject: confirmationEmail.subject,
+        html: confirmationEmail.html,
+        text: confirmationEmail.text,
+      })
+
+      // Send notification email to business
+      if (business.email) {
+        const notificationEmail = bookingNotificationEmail({
+          ...emailData,
+          customerPhone,
+        })
+        await sendEmail({
+          to: business.email,
+          subject: notificationEmail.subject,
+          html: notificationEmail.html,
+          text: notificationEmail.text,
+        })
+      }
+    } catch (emailError) {
+      console.error('Error sending booking emails:', emailError)
+      // Don't fail the booking if email fails
+    }
 
     return NextResponse.json({
       id: booking.id,
