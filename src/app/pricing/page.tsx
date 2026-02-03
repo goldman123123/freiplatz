@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { auth } from '@clerk/nextjs/server'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -106,7 +107,10 @@ const comparisonFeatures = [
   { name: 'Dedicated manager', free: false, starter: false, professional: false, business: true },
 ]
 
-export default function PricingPage() {
+export default async function PricingPage() {
+  const { userId } = await auth()
+  const isLoggedIn = !!userId
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       {/* Header */}
@@ -119,12 +123,20 @@ export default function PricingPage() {
             <span className="text-xl font-bold">Freiplatz</span>
           </Link>
           <div className="flex items-center gap-4">
-            <Link href="/sign-in">
-              <Button variant="ghost">Sign In</Button>
-            </Link>
-            <Link href="/sign-up">
-              <Button>Get Started</Button>
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/dashboard">
+                <Button>Dashboard</Button>
+              </Link>
+            ) : (
+              <>
+                <Link href="/sign-in">
+                  <Button variant="ghost">Sign In</Button>
+                </Link>
+                <Link href="/sign-up">
+                  <Button>Get Started</Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -177,9 +189,9 @@ export default function PricingPage() {
                 </ul>
               </CardContent>
               <CardFooter>
-                <Link href="/sign-up" className="w-full">
+                <Link href={isLoggedIn ? "/dashboard" : "/sign-up"} className="w-full">
                   <Button variant={tier.ctaVariant} className="w-full">
-                    {tier.cta}
+                    {isLoggedIn ? "Go to Dashboard" : tier.cta}
                   </Button>
                 </Link>
               </CardFooter>
@@ -300,15 +312,15 @@ export default function PricingPage() {
       <section className="border-t bg-primary/5 py-16">
         <div className="mx-auto max-w-6xl px-4 text-center">
           <h2 className="text-3xl font-bold text-gray-900">
-            Ready to get started?
+            {isLoggedIn ? "Upgrade your plan" : "Ready to get started?"}
           </h2>
           <p className="mt-4 text-xl text-gray-600">
-            Join thousands of businesses using Freiplatz to manage their bookings
+            {isLoggedIn ? "Choose a plan that fits your business needs" : "Join thousands of businesses using Freiplatz to manage their bookings"}
           </p>
           <div className="mt-8 flex items-center justify-center gap-4">
-            <Link href="/sign-up">
+            <Link href={isLoggedIn ? "/dashboard" : "/sign-up"}>
               <Button size="lg" className="text-lg">
-                Start Free Trial
+                {isLoggedIn ? "Go to Dashboard" : "Start Free Trial"}
               </Button>
             </Link>
             <Link href="/book/physioplus">

@@ -1,8 +1,11 @@
 import Link from 'next/link'
+import { auth } from '@clerk/nextjs/server'
 import { Button } from '@/components/ui/button'
 import { Calendar, Clock, Users, Zap } from 'lucide-react'
 
-export default function Home() {
+export default async function Home() {
+  const { userId } = await auth()
+  const isLoggedIn = !!userId
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
       {/* Header */}
@@ -18,12 +21,20 @@ export default function Home() {
             <Link href="/pricing" className="text-sm font-medium text-gray-600 hover:text-gray-900">
               Pricing
             </Link>
-            <Link href="/sign-in">
-              <Button variant="ghost">Sign In</Button>
-            </Link>
-            <Link href="/sign-up">
-              <Button>Get Started</Button>
-            </Link>
+            {isLoggedIn ? (
+              <Link href="/dashboard">
+                <Button>Dashboard</Button>
+              </Link>
+            ) : (
+              <>
+                <Link href="/sign-in">
+                  <Button variant="ghost">Sign In</Button>
+                </Link>
+                <Link href="/sign-up">
+                  <Button>Get Started</Button>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -40,9 +51,9 @@ export default function Home() {
           for them, while you focus on what you do best.
         </p>
         <div className="mt-10 flex items-center justify-center gap-4">
-          <Link href="/sign-up">
+          <Link href={isLoggedIn ? "/dashboard" : "/sign-up"}>
             <Button size="lg" className="text-lg">
-              Start Free Trial
+              {isLoggedIn ? "Go to Dashboard" : "Start Free Trial"}
             </Button>
           </Link>
           <Link href="/book/physioplus">
@@ -104,14 +115,14 @@ export default function Home() {
       <section className="py-24">
         <div className="mx-auto max-w-6xl px-4 text-center">
           <h2 className="text-3xl font-bold text-gray-900">
-            Ready to streamline your bookings?
+            {isLoggedIn ? "Welcome back!" : "Ready to streamline your bookings?"}
           </h2>
           <p className="mt-4 text-xl text-gray-600">
-            Join thousands of businesses using Freiplatz
+            {isLoggedIn ? "Continue managing your bookings" : "Join thousands of businesses using Freiplatz"}
           </p>
-          <Link href="/sign-up" className="mt-8 inline-block">
+          <Link href={isLoggedIn ? "/dashboard" : "/sign-up"} className="mt-8 inline-block">
             <Button size="lg" className="text-lg">
-              Get Started Free
+              {isLoggedIn ? "Go to Dashboard" : "Get Started Free"}
             </Button>
           </Link>
         </div>
