@@ -973,7 +973,7 @@ export async function createBusinessMember(data: {
   status: string
   invitedBy?: string
 }) {
-  const result = await db
+  const result = (await db
     .insert(businessMembers)
     .values({
       businessId: data.businessId,
@@ -984,9 +984,9 @@ export async function createBusinessMember(data: {
       invitedAt: data.status === 'invited' ? new Date() : null,
       joinedAt: data.status === 'active' ? new Date() : null,
     })
-    .returning()
+    .returning()) as any[]
 
-  return result[0] as any
+  return result[0]
 }
 
 export async function updateMemberRole(memberId: string, role: string) {

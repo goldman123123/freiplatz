@@ -8,7 +8,7 @@
 
 import { db } from '@/lib/db'
 import { eventOutbox } from '@/lib/db/schema'
-import { isNull, lt, lte, and, or } from 'drizzle-orm'
+import { isNull, lt, lte, and, or, eq } from 'drizzle-orm'
 import { sendEmail } from '@/lib/email'
 import {
   bookingConfirmationEmail,
@@ -93,7 +93,7 @@ async function processEvent(event: typeof eventOutbox.$inferSelect): Promise<voi
         attempts: event.attempts + 1,
         lastError: null,
       })
-      .where({ id: event.id })
+      .where(eq(eventOutbox.id, event.id))
 
     console.log(`[EventProcessor] Event ${event.id} processed successfully`)
   } catch (error) {
@@ -113,7 +113,7 @@ async function processEvent(event: typeof eventOutbox.$inferSelect): Promise<voi
         lastError: errorMessage.substring(0, 1000), // Limit error length
         nextRetryAt: newAttempts < event.maxAttempts ? nextRetryAt : null,
       })
-      .where({ id: event.id })
+      .where(eq(eventOutbox.id, event.id))
 
     console.error(
       `[EventProcessor] Event ${event.id} failed (attempt ${newAttempts}/${event.maxAttempts}):`,
@@ -140,23 +140,23 @@ async function processEvent(event: typeof eventOutbox.$inferSelect): Promise<voi
 async function handleEvent(eventType: EventType, payload: Record<string, unknown>): Promise<void> {
   switch (eventType) {
     case 'booking.created':
-      await handleBookingCreated(payload as BookingCreatedPayload)
+      await handleBookingCreated(payload as unknown as BookingCreatedPayload)
       break
 
     case 'booking.confirmed':
-      await handleBookingConfirmed(payload as BookingConfirmedPayload)
+      await handleBookingConfirmed(payload as unknown as BookingConfirmedPayload)
       break
 
     case 'booking.cancelled':
-      await handleBookingCancelled(payload as BookingCancelledPayload)
+      await handleBookingCancelled(payload as unknown as BookingCancelledPayload)
       break
 
     case 'booking.reminded':
-      await handleBookingReminded(payload as BookingRemindedPayload)
+      await handleBookingReminded(payload as unknown as BookingRemindedPayload)
       break
 
     case 'member.invited':
-      await handleMemberInvited(payload as MemberInvitedPayload)
+      await handleMemberInvited(payload as unknown as MemberInvitedPayload)
       break
 
     default:

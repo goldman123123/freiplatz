@@ -74,7 +74,7 @@ export const businessMembers = pgTable('business_members', {
   status: text('status').notNull().default('active'),
 
   // Invitation tracking
-  invitedBy: uuid('invited_by').references(() => businessMembers.id),
+  invitedBy: uuid('invited_by'),
   invitedAt: timestamp('invited_at', { withTimezone: true }),
   joinedAt: timestamp('joined_at', { withTimezone: true }),
 
