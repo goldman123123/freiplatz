@@ -17,7 +17,7 @@ import { z } from 'zod'
 const inviteMemberSchema = z.object({
   email: z.string().email('Ungültige E-Mail-Adresse'),
   role: z.enum(['owner', 'admin', 'staff'], {
-    errorMap: () => ({ message: 'Rolle muss owner, admin oder staff sein' })
+    message: 'Rolle muss owner, admin oder staff sein'
   }),
 })
 

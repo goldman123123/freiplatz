@@ -14,7 +14,7 @@ import { z } from 'zod'
 
 const updateMemberSchema = z.object({
   role: z.enum(['owner', 'admin', 'staff'], {
-    errorMap: () => ({ message: 'Rolle muss owner, admin oder staff sein' })
+    message: 'Rolle muss owner, admin oder staff sein'
   }),
 })
 
