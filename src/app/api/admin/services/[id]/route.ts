@@ -20,7 +20,7 @@ export async function GET(
     return NextResponse.json({ error: 'Service not found' }, { status: 404 })
   }
 
-  const service = await getServiceById(id)
+  const service = await getServiceById(id, authResult.business.id)
 
   if (!service) {
     return NextResponse.json({ error: 'Service not found' }, { status: 404 })

@@ -8,6 +8,13 @@
       "when": 1770085789452,
       "tag": "0000_mighty_frog_thor",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1770160227567,
+      "tag": "0001_true_phantom_reporter",
+      "breakpoints": true
     }
   ]
 }

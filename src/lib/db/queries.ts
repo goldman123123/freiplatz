@@ -1,6 +1,7 @@
 import { db } from './index'
 import {
   businesses,
+  businessMembers,
   services,
   staff,
   staffServices,
@@ -10,7 +11,7 @@ import {
   customers,
   bookings
 } from './schema'
-import { eq, and, gte, lte, sql, desc, asc, isNull, or } from 'drizzle-orm'
+import { eq, and, gte, lte, sql, desc, asc, isNull, or, inArray } from 'drizzle-orm'
 
 // ============================================
 // BUSINESS QUERIES
@@ -145,11 +146,14 @@ export async function getServicesByBusiness(businessId: string) {
     .orderBy(asc(services.sortOrder), asc(services.name))
 }
 
-export async function getServiceById(serviceId: string) {
+export async function getServiceById(serviceId: string, businessId: string) {
   const results = await db
     .select()
     .from(services)
-    .where(eq(services.id, serviceId))
+    .where(and(
+      eq(services.id, serviceId),
+      eq(services.businessId, businessId)
+    ))
     .limit(1)
   return results[0] || null
 }
@@ -169,11 +173,14 @@ export async function getStaffByBusiness(businessId: string) {
     .orderBy(asc(staff.name))
 }
 
-export async function getStaffById(staffId: string) {
+export async function getStaffById(staffId: string, businessId: string) {
   const results = await db
     .select()
     .from(staff)
-    .where(eq(staff.id, staffId))
+    .where(and(
+      eq(staff.id, staffId),
+      eq(staff.businessId, businessId)
+    ))
     .limit(1)
   return results[0] || null
 }
@@ -516,6 +523,7 @@ export async function getBookingStats(businessId: string) {
 
 export async function updateBookingStatus(
   bookingId: string,
+  businessId: string,
   status: 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show',
   options?: {
     cancellationReason?: string
@@ -544,7 +552,10 @@ export async function updateBookingStatus(
   const result = await db
     .update(bookings)
     .set(updateData)
-    .where(eq(bookings.id, bookingId))
+    .where(and(
+      eq(bookings.id, bookingId),
+      eq(bookings.businessId, businessId)
+    ))
     .returning()
 
   return result[0]
@@ -650,8 +661,8 @@ export async function getAllStaff(businessId: string) {
     .orderBy(asc(staff.name))
 }
 
-export async function getStaffWithServices(staffId: string) {
-  const staffMember = await getStaffById(staffId)
+export async function getStaffWithServices(staffId: string, businessId: string) {
+  const staffMember = await getStaffById(staffId, businessId)
   if (!staffMember) return null
 
   const serviceIds = await db
@@ -696,7 +707,7 @@ export async function createStaff(data: {
 
   // Assign services if provided
   if (serviceIds && serviceIds.length > 0) {
-    await updateStaffServices(newStaff.id, serviceIds)
+    await updateStaffServices(newStaff.id, serviceIds, staffData.businessId)
   }
 
   return newStaff
@@ -728,21 +739,52 @@ export async function deleteStaff(staffId: string) {
   return updateStaff(staffId, { isActive: false })
 }
 
-export async function updateStaffServices(staffId: string, serviceIds: string[]) {
-  // Delete existing assignments
-  await db
-    .delete(staffServices)
-    .where(eq(staffServices.staffId, staffId))
+export async function updateStaffServices(staffId: string, serviceIds: string[], businessId: string) {
+  return await db.transaction(async (tx) => {
+    // Verify staff belongs to business
+    const staffMember = await tx
+      .select({ id: staff.id })
+      .from(staff)
+      .where(and(
+        eq(staff.id, staffId),
+        eq(staff.businessId, businessId)
+      ))
+      .limit(1)
 
-  // Insert new assignments
-  if (serviceIds.length > 0) {
-    await db
-      .insert(staffServices)
-      .values(serviceIds.map(serviceId => ({
-        staffId,
-        serviceId,
-      })))
-  }
+    if (!staffMember[0]) {
+      throw new Error('Personal nicht gefunden oder Zugriff verweigert')
+    }
+
+    // Verify all services belong to same business
+    if (serviceIds.length > 0) {
+      const validServices = await tx
+        .select({ id: services.id })
+        .from(services)
+        .where(and(
+          inArray(services.id, serviceIds),
+          eq(services.businessId, businessId)
+        ))
+
+      if (validServices.length !== serviceIds.length) {
+        throw new Error('Ungültige Dienst-IDs oder Zugriff verweigert')
+      }
+    }
+
+    // Delete existing assignments
+    await tx
+      .delete(staffServices)
+      .where(eq(staffServices.staffId, staffId))
+
+    // Insert new assignments
+    if (serviceIds.length > 0) {
+      await tx
+        .insert(staffServices)
+        .values(serviceIds.map(serviceId => ({
+          staffId,
+          serviceId,
+        })))
+    }
+  })
 }
 
 // ============================================
@@ -910,4 +952,68 @@ export async function updateBusiness(
     .returning()
 
   return result[0]
+}
+
+// ============================================
+// MEMBER MANAGEMENT
+// ============================================
+
+export async function getBusinessMembers(businessId: string) {
+  return db
+    .select()
+    .from(businessMembers)
+    .where(eq(businessMembers.businessId, businessId))
+    .orderBy(desc(businessMembers.createdAt))
+}
+
+export async function createBusinessMember(data: {
+  businessId: string
+  clerkUserId: string
+  role: string
+  status: string
+  invitedBy?: string
+}) {
+  const result = await db
+    .insert(businessMembers)
+    .values({
+      businessId: data.businessId,
+      clerkUserId: data.clerkUserId,
+      role: data.role,
+      status: data.status,
+      invitedBy: data.invitedBy,
+      invitedAt: data.status === 'invited' ? new Date() : null,
+      joinedAt: data.status === 'active' ? new Date() : null,
+    })
+    .returning()
+
+  return result[0]
+}
+
+export async function updateMemberRole(memberId: string, role: string) {
+  const result = await db
+    .update(businessMembers)
+    .set({
+      role,
+      updatedAt: new Date(),
+    })
+    .where(eq(businessMembers.id, memberId))
+    .returning()
+
+  return result[0]
+}
+
+export async function removeMember(memberId: string) {
+  await db
+    .delete(businessMembers)
+    .where(eq(businessMembers.id, memberId))
+}
+
+export async function getMemberById(memberId: string) {
+  const results = await db
+    .select()
+    .from(businessMembers)
+    .where(eq(businessMembers.id, memberId))
+    .limit(1)
+
+  return results[0] || null
 }

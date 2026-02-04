@@ -4,11 +4,11 @@ import {
   getServiceById,
   getStaffById,
   getOrCreateCustomer,
-  createBooking,
 } from '@/lib/db/queries'
 import { isSlotAvailable } from '@/lib/availability'
-import { sendEmail } from '@/lib/email'
-import { bookingConfirmationEmail, bookingNotificationEmail } from '@/lib/email-templates'
+import { db } from '@/lib/db'
+import { bookings } from '@/lib/db/schema'
+import { emitEvent } from '@/modules/core/events'
 
 export async function POST(
   request: NextRequest,
@@ -46,8 +46,8 @@ export async function POST(
     }
 
     // Get service
-    const service = await getServiceById(serviceId)
-    if (!service || service.businessId !== business.id) {
+    const service = await getServiceById(serviceId, business.id)
+    if (!service) {
       return NextResponse.json(
         { error: 'Service not found' },
         { status: 404 }
@@ -90,64 +90,51 @@ export async function POST(
     // Get staff name if assigned
     let staffName: string | undefined
     if (staffId) {
-      const staffMember = await getStaffById(staffId)
+      const staffMember = await getStaffById(staffId, business.id)
       staffName = staffMember?.name
     }
 
-    // Create booking
-    const booking = await createBooking({
-      businessId: business.id,
-      serviceId,
-      staffId,
-      customerId: customer.id,
-      startsAt: slotStart,
-      endsAt,
-      price: service.price || undefined,
-      notes,
-      source: 'web',
-    })
+    // Create booking within transaction and emit event
+    const booking = await db.transaction(async (tx) => {
+      // Create booking
+      const inserted = await tx
+        .insert(bookings)
+        .values({
+          businessId: business.id,
+          serviceId,
+          staffId,
+          customerId: customer.id,
+          startsAt: slotStart,
+          endsAt,
+          price: service.price || undefined,
+          notes,
+          source: 'web',
+          status: 'pending',
+        })
+        .returning()
 
-    // Send confirmation email to customer
-    const emailData = {
-      customerName,
-      customerEmail,
-      serviceName: service.name,
-      staffName,
-      businessName: business.name,
-      startsAt: slotStart,
-      endsAt,
-      confirmationToken: booking.confirmationToken || booking.id,
-      notes,
-      price: service.price ? parseFloat(service.price) : undefined,
-      currency: business.currency || 'EUR',
-    }
+      const booking = inserted[0]
 
-    try {
-      const confirmationEmail = bookingConfirmationEmail(emailData)
-      await sendEmail({
-        to: customerEmail,
-        subject: confirmationEmail.subject,
-        html: confirmationEmail.html,
-        text: confirmationEmail.text,
+      // Emit booking.created event (async email processing)
+      await emitEvent(tx, business.id, 'booking.created', {
+        bookingId: booking.id,
+        customerEmail,
+        customerName,
+        customerPhone,
+        serviceName: service.name,
+        businessName: business.name,
+        businessEmail: business.email || undefined,
+        staffName,
+        startsAt: slotStart.toISOString(),
+        endsAt: endsAt.toISOString(),
+        price: service.price ? parseFloat(service.price) : undefined,
+        currency: business.currency || 'EUR',
+        confirmationToken: booking.confirmationToken || booking.id,
+        notes,
       })
 
-      // Send notification email to business
-      if (business.email) {
-        const notificationEmail = bookingNotificationEmail({
-          ...emailData,
-          customerPhone,
-        })
-        await sendEmail({
-          to: business.email,
-          subject: notificationEmail.subject,
-          html: notificationEmail.html,
-          text: notificationEmail.text,
-        })
-      }
-    } catch (emailError) {
-      console.error('Error sending booking emails:', emailError)
-      // Don't fail the booking if email fails
-    }
+      return booking
+    })
 
     return NextResponse.json({
       id: booking.id,
@@ -158,6 +145,17 @@ export async function POST(
     })
   } catch (error) {
     console.error('Error creating booking:', error)
+
+    // Handle double-booking constraint violation
+    if (error && typeof error === 'object' && 'constraint' in error) {
+      if ((error as { constraint?: string }).constraint === 'no_overlapping_bookings') {
+        return NextResponse.json(
+          { error: 'Dieser Zeitslot ist nicht mehr verfügbar. Bitte wählen Sie eine andere Zeit.' },
+          { status: 409 }
+        )
+      }
+    }
+
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { auth } from '@clerk/nextjs/server'
+import { SignOutButton } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
-import { Calendar, Clock, Users, Zap } from 'lucide-react'
+import { Calendar, Clock, Users, Zap, LogOut } from 'lucide-react'
 
 export default async function Home() {
   const { userId } = await auth()
@@ -22,9 +23,17 @@ export default async function Home() {
               Pricing
             </Link>
             {isLoggedIn ? (
-              <Link href="/dashboard">
-                <Button>Dashboard</Button>
-              </Link>
+              <>
+                <Link href="/dashboard">
+                  <Button>Dashboard</Button>
+                </Link>
+                <SignOutButton>
+                  <Button variant="ghost" size="sm">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </SignOutButton>
+              </>
             ) : (
               <>
                 <Link href="/sign-in">

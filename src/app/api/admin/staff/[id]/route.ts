@@ -20,7 +20,7 @@ export async function GET(
     return NextResponse.json({ error: 'Staff not found' }, { status: 404 })
   }
 
-  const staffMember = await getStaffWithServices(id)
+  const staffMember = await getStaffWithServices(id, authResult.business.id)
 
   if (!staffMember) {
     return NextResponse.json({ error: 'Staff not found' }, { status: 404 })

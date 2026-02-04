@@ -31,9 +31,9 @@ export async function PUT(
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 })
   }
 
-  await updateStaffServices(id, parsed.data.serviceIds)
+  await updateStaffServices(id, parsed.data.serviceIds, authResult.business.id)
 
-  const staffMember = await getStaffWithServices(id)
+  const staffMember = await getStaffWithServices(id, authResult.business.id)
 
   return NextResponse.json({ staff: staffMember })
 }

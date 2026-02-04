@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { auth } from '@clerk/nextjs/server'
+import { SignOutButton } from '@clerk/nextjs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Calendar, Check } from 'lucide-react'
+import { Calendar, Check, LogOut } from 'lucide-react'
 
 const tiers = [
   {
@@ -124,9 +125,17 @@ export default async function PricingPage() {
           </Link>
           <div className="flex items-center gap-4">
             {isLoggedIn ? (
-              <Link href="/dashboard">
-                <Button>Dashboard</Button>
-              </Link>
+              <>
+                <Link href="/dashboard">
+                  <Button>Dashboard</Button>
+                </Link>
+                <SignOutButton>
+                  <Button variant="ghost" size="sm">
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </SignOutButton>
+              </>
             ) : (
               <>
                 <Link href="/sign-in">

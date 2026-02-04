@@ -8,6 +8,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: false, // Allow self-signed/mismatched certs (shared hosting)
+  },
 })
 
 interface SendEmailOptions {
@@ -18,13 +21,24 @@ interface SendEmailOptions {
 }
 
 export async function sendEmail(options: SendEmailOptions) {
+  console.log('[Email] Attempting to send email to:', options.to)
+  console.log('[Email] SMTP_HOST:', process.env.SMTP_HOST ? 'SET' : 'NOT SET')
+  console.log('[Email] SMTP_USER:', process.env.SMTP_USER ? 'SET' : 'NOT SET')
+
   if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
-    console.warn('Email not configured - skipping email send')
+    console.warn('[Email] Email not configured - skipping email send')
     return null
   }
 
-  return transporter.sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    ...options,
-  })
+  try {
+    const result = await transporter.sendMail({
+      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+      ...options,
+    })
+    console.log('[Email] Email sent successfully, messageId:', result.messageId)
+    return result
+  } catch (error) {
+    console.error('[Email] Failed to send email:', error)
+    throw error
+  }
 }

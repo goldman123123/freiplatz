@@ -29,7 +29,7 @@ export async function GET(
       )
     }
 
-    const service = await getServiceById(serviceId)
+    const service = await getServiceById(serviceId, business.id)
     if (!service) {
       return NextResponse.json(
         { error: 'Service not found' },

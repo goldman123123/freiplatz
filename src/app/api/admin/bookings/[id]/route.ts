@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireBusinessAuth } from '@/lib/auth'
 import { getBookingById, updateBookingStatus, verifyBookingOwnership } from '@/lib/db/queries'
 import { bookingStatusSchema } from '@/lib/validations/schemas'
-import { sendEmail } from '@/lib/email'
-import { bookingConfirmedEmail, bookingCancellationEmail } from '@/lib/email-templates'
+import { db } from '@/lib/db'
+import { emitEventStandalone } from '@/modules/core/events'
 
 export async function GET(
   request: NextRequest,
@@ -64,7 +64,7 @@ export async function PATCH(
   const { status, cancellationReason, cancelledBy, internalNotes } = parsed.data
   const previousStatus = currentBooking.booking.status
 
-  const booking = await updateBookingStatus(id, status, {
+  const booking = await updateBookingStatus(id, authResult.business.id, status, {
     cancellationReason: cancellationReason || undefined,
     cancelledBy: cancelledBy || undefined,
     internalNotes: internalNotes || undefined,
@@ -74,47 +74,42 @@ export async function PATCH(
     return NextResponse.json({ error: 'Booking not found' }, { status: 404 })
   }
 
-  // Send status change emails
+  // Emit events for status changes (async email processing)
   if (status !== previousStatus && currentBooking.customer?.email) {
-    const emailData = {
-      customerName: currentBooking.customer.name || 'Kunde',
-      customerEmail: currentBooking.customer.email,
-      serviceName: currentBooking.service?.name || 'Service',
-      staffName: currentBooking.staffMember?.name,
-      businessName: authResult.business.name,
-      startsAt: currentBooking.booking.startsAt,
-      endsAt: currentBooking.booking.endsAt,
-      confirmationToken: currentBooking.booking.confirmationToken || currentBooking.booking.id,
-      price: currentBooking.service?.price ? parseFloat(currentBooking.service.price) : undefined,
-      currency: authResult.business.currency || 'EUR',
-    }
-
     try {
       if (status === 'confirmed' && previousStatus !== 'confirmed') {
-        // Send confirmation email
-        const email = bookingConfirmedEmail(emailData)
-        await sendEmail({
-          to: currentBooking.customer.email,
-          subject: email.subject,
-          html: email.html,
-          text: email.text,
+        // Emit booking.confirmed event
+        await emitEventStandalone(authResult.business.id, 'booking.confirmed', {
+          bookingId: id,
+          customerEmail: currentBooking.customer.email,
+          customerName: currentBooking.customer.name || 'Kunde',
+          serviceName: currentBooking.service?.name || 'Service',
+          staffName: currentBooking.staffMember?.name,
+          businessName: authResult.business.name,
+          startsAt: currentBooking.booking.startsAt.toISOString(),
+          endsAt: currentBooking.booking.endsAt.toISOString(),
+          price: currentBooking.service?.price ? parseFloat(currentBooking.service.price) : undefined,
+          currency: authResult.business.currency || 'EUR',
+          confirmationToken: currentBooking.booking.confirmationToken || currentBooking.booking.id,
         })
       } else if (status === 'cancelled' && previousStatus !== 'cancelled') {
-        // Send cancellation email
-        const email = bookingCancellationEmail({
-          ...emailData,
+        // Emit booking.cancelled event
+        await emitEventStandalone(authResult.business.id, 'booking.cancelled', {
+          bookingId: id,
+          customerEmail: currentBooking.customer.email,
+          customerName: currentBooking.customer.name || 'Kunde',
+          serviceName: currentBooking.service?.name || 'Service',
+          staffName: currentBooking.staffMember?.name,
+          businessName: authResult.business.name,
+          startsAt: currentBooking.booking.startsAt.toISOString(),
+          endsAt: currentBooking.booking.endsAt.toISOString(),
           reason: cancellationReason || undefined,
-        })
-        await sendEmail({
-          to: currentBooking.customer.email,
-          subject: email.subject,
-          html: email.html,
-          text: email.text,
+          cancelledBy: cancelledBy || 'staff',
         })
       }
-    } catch (emailError) {
-      console.error('Error sending status change email:', emailError)
-      // Don't fail the status update if email fails
+    } catch (eventError) {
+      console.error('Error emitting status change event:', eventError)
+      // Don't fail the status update if event emission fails
     }
   }
 

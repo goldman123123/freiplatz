@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { auth } from '@clerk/nextjs/server'
+import { auth, clerkClient } from '@clerk/nextjs/server'
 import { createBusinessForUser, getBusinessForUser, getBusinessBySlug } from '@/lib/db/queries'
 import { z } from 'zod'
 
@@ -36,13 +36,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'This booking URL is already taken' }, { status: 400 })
   }
 
+  // Get Clerk user's email as fallback if no business email provided
+  let businessEmail = parsed.data.email
+  if (!businessEmail) {
+    const client = await clerkClient()
+    const user = await client.users.getUser(userId)
+    businessEmail = user.primaryEmailAddress?.emailAddress
+  }
+
   const business = await createBusinessForUser({
     clerkUserId: userId,
     name: parsed.data.name,
     slug: parsed.data.slug,
     type: parsed.data.type,
     timezone: parsed.data.timezone,
-    email: parsed.data.email || undefined,
+    email: businessEmail || undefined,
   })
 
   return NextResponse.json({ business }, { status: 201 })
