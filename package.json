@@ -52,6 +52,8 @@
     "svix": "^1.84.1",
     "tailwind-merge": "^3.4.0",
     "turndown": "^7.2.2",
+    "twilio": "^5.12.1",
+    "vanilla-cookieconsent": "^3.1.0",
     "xml-js": "^1.6.11",
     "zod": "^4.3.6"
   },
