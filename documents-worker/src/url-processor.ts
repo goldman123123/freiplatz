@@ -333,7 +333,7 @@ async function scrapePage(url: string): Promise<ScrapedPage> {
 }
 
 /**
- * Check if content hash already exists
+ * Check if content hash already exists (only for active documents)
  */
 async function checkExistingHash(
   businessId: string,
@@ -345,6 +345,7 @@ async function checkExistingHash(
     JOIN documents d ON d.id = dv.document_id
     WHERE d.business_id = ${businessId}
       AND dv.sha256_hash = ${contentHash}
+      AND d.status = 'active'
     LIMIT 1
   `
   return result.length > 0
