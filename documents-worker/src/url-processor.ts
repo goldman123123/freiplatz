@@ -107,6 +107,11 @@ export async function processUrlJob(job: UrlJob): Promise<UrlProcessResult> {
         await heartbeat(job.id)
         documentsCreated++
 
+        // Link the first document version to the job for status tracking
+        if (documentsCreated === 1) {
+          await linkJobToVersion(job.id, versionId)
+        }
+
         // Update job stage to chunking
         await updateJobStage(job.id, 'chunking' as any)
 
@@ -237,37 +242,41 @@ async function scrapePage(url: string): Promise<ScrapedPage> {
 
     // Get the raw bytes and decode with proper encoding
     const buffer = await response.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
 
-    // Detect encoding from Content-Type header or default to UTF-8
-    const contentType = response.headers.get('content-type') || ''
-    const charsetMatch = contentType.match(/charset=([^\s;]+)/i)
-    let encoding = charsetMatch ? charsetMatch[1].toLowerCase() : 'utf-8'
+    // Always try UTF-8 first (most common for modern websites)
+    let html = new TextDecoder('utf-8').decode(bytes)
 
-    // Normalize common encoding names
-    if (encoding === 'iso-8859-1' || encoding === 'latin1' || encoding === 'latin-1') {
-      encoding = 'iso-8859-1'
-    }
+    // Check if we got mojibake (UTF-8 bytes misinterpreted)
+    // Common patterns: Ã¤ (ä), Ã¶ (ö), Ã¼ (ü), ÃŸ (ß), Ã© (é)
+    const hasMojibake = /Ã[¤¶¼Ÿ©]|â€|Â§|Â /.test(html)
 
-    // Decode the HTML with the correct encoding
-    let html: string
-    try {
-      const decoder = new TextDecoder(encoding)
-      html = decoder.decode(buffer)
-    } catch {
-      // Fallback to UTF-8 if encoding is not supported
-      const decoder = new TextDecoder('utf-8')
-      html = decoder.decode(buffer)
-    }
-
-    // Check for meta charset in HTML and re-decode if needed
-    const metaCharsetMatch = html.match(/<meta[^>]+charset=["']?([^"'\s>]+)/i)
-    if (metaCharsetMatch && metaCharsetMatch[1].toLowerCase() !== encoding) {
-      const metaEncoding = metaCharsetMatch[1].toLowerCase()
+    if (hasMojibake) {
+      // The content was double-encoded or served as Latin-1
+      // Try to fix by re-encoding as Latin-1 and decoding as UTF-8
       try {
-        const decoder = new TextDecoder(metaEncoding)
-        html = decoder.decode(buffer)
+        // Convert the string back to bytes as if it were Latin-1
+        const latin1Bytes = new Uint8Array(html.length)
+        for (let i = 0; i < html.length; i++) {
+          latin1Bytes[i] = html.charCodeAt(i) & 0xff
+        }
+        html = new TextDecoder('utf-8').decode(latin1Bytes)
       } catch {
-        // Keep the original decode if meta charset is not supported
+        // Keep original if conversion fails
+      }
+    }
+
+    // If still has issues, check meta charset
+    const metaCharsetMatch = html.match(/<meta[^>]+charset=["']?([^"'\s>]+)/i) ||
+                             html.match(/<meta[^>]+content=["'][^"']*charset=([^"'\s;]+)/i)
+    if (metaCharsetMatch) {
+      const metaEncoding = metaCharsetMatch[1].toLowerCase().replace(/['"]/g, '')
+      if (metaEncoding && metaEncoding !== 'utf-8') {
+        try {
+          html = new TextDecoder(metaEncoding).decode(bytes)
+        } catch {
+          // Keep UTF-8 decode if meta charset is not supported
+        }
       }
     }
     const $ = cheerio.load(html)
@@ -402,6 +411,17 @@ async function createVersionRecord(
     RETURNING id
   `
   return result[0].id
+}
+
+/**
+ * Link ingestion job to document version for status tracking
+ */
+async function linkJobToVersion(jobId: string, versionId: string): Promise<void> {
+  await sql`
+    UPDATE ingestion_jobs
+    SET document_version_id = ${versionId}, updated_at = NOW()
+    WHERE id = ${jobId}
+  `
 }
 
 /**
