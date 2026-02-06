@@ -221,6 +221,8 @@ async function scrapePage(url: string): Promise<ScrapedPage> {
       signal: controller.signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; HebelkiBot/1.0; Website scraper)',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Charset': 'utf-8',
       },
     })
 
@@ -233,7 +235,41 @@ async function scrapePage(url: string): Promise<ScrapedPage> {
       throw new Error('Content too large')
     }
 
-    const html = await response.text()
+    // Get the raw bytes and decode with proper encoding
+    const buffer = await response.arrayBuffer()
+
+    // Detect encoding from Content-Type header or default to UTF-8
+    const contentType = response.headers.get('content-type') || ''
+    const charsetMatch = contentType.match(/charset=([^\s;]+)/i)
+    let encoding = charsetMatch ? charsetMatch[1].toLowerCase() : 'utf-8'
+
+    // Normalize common encoding names
+    if (encoding === 'iso-8859-1' || encoding === 'latin1' || encoding === 'latin-1') {
+      encoding = 'iso-8859-1'
+    }
+
+    // Decode the HTML with the correct encoding
+    let html: string
+    try {
+      const decoder = new TextDecoder(encoding)
+      html = decoder.decode(buffer)
+    } catch {
+      // Fallback to UTF-8 if encoding is not supported
+      const decoder = new TextDecoder('utf-8')
+      html = decoder.decode(buffer)
+    }
+
+    // Check for meta charset in HTML and re-decode if needed
+    const metaCharsetMatch = html.match(/<meta[^>]+charset=["']?([^"'\s>]+)/i)
+    if (metaCharsetMatch && metaCharsetMatch[1].toLowerCase() !== encoding) {
+      const metaEncoding = metaCharsetMatch[1].toLowerCase()
+      try {
+        const decoder = new TextDecoder(metaEncoding)
+        html = decoder.decode(buffer)
+      } catch {
+        // Keep the original decode if meta charset is not supported
+      }
+    }
     const $ = cheerio.load(html)
 
     // Extract title
