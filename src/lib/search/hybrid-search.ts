@@ -288,7 +288,7 @@ function buildKnowledgeAccessConditions(context: AccessContext) {
     return or(...customerConditions)
   } else {
     // Staff/Owner mode: can access public + internal
-    // AND global + staff-scoped to themselves + customer-scoped if specified
+    // AND global + customer-scoped if specified
     const audienceCondition = or(
       eq(chatbotKnowledge.audience, 'public'),
       eq(chatbotKnowledge.audience, 'internal')
@@ -298,15 +298,8 @@ function buildKnowledgeAccessConditions(context: AccessContext) {
       eq(chatbotKnowledge.scopeType, 'global'),
     ]
 
-    // Staff can see their own staff-scoped docs
-    if (context.actorId) {
-      scopeConditions.push(
-        and(
-          eq(chatbotKnowledge.scopeType, 'staff'),
-          eq(chatbotKnowledge.scopeId, context.actorId)
-        )!
-      )
-    }
+    // Note: We don't filter by staff-scoped here because actorId is a Clerk user ID,
+    // not a UUID. Staff-scoped documents would need the staff member's UUID.
 
     // If querying about a specific customer, include their customer-scoped docs
     if (context.customerScopeId) {
@@ -566,6 +559,7 @@ function buildDocumentAccessConditions(context: AccessContext) {
     return and(eq(documents.status, 'active'), or(...customerConditions))
   } else {
     // Staff/Owner mode: can access public + internal
+    // AND global + customer-scoped if specified
     const audienceCondition = or(
       eq(documents.audience, 'public'),
       eq(documents.audience, 'internal')
@@ -575,15 +569,8 @@ function buildDocumentAccessConditions(context: AccessContext) {
       eq(documents.scopeType, 'global'),
     ]
 
-    // Staff can see their own staff-scoped docs
-    if (context.actorId) {
-      scopeConditions.push(
-        and(
-          eq(documents.scopeType, 'staff'),
-          eq(documents.scopeId, context.actorId)
-        )!
-      )
-    }
+    // Note: We don't filter by staff-scoped here because actorId is a Clerk user ID,
+    // not a UUID. Staff-scoped documents would need the staff member's UUID.
 
     // If querying about a specific customer, include their customer-scoped docs
     if (context.customerScopeId) {
