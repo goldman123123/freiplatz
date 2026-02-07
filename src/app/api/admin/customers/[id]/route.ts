@@ -25,7 +25,7 @@ const updateCustomerSchema = z.object({
   phone: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   source: z.string().optional(),
-  customFields: z.record(z.any()).optional(),
+  customFields: z.record(z.string(), z.any()).optional(),
 })
 
 interface RouteParams {

@@ -17,7 +17,7 @@ const createCustomerSchema = z.object({
   phone: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   source: z.string().optional().default('manual'),
-  customFields: z.record(z.any()).optional().default({}),
+  customFields: z.record(z.string(), z.any()).optional().default({}),
 })
 
 export async function GET(request: NextRequest) {

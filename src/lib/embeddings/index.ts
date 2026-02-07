@@ -3,25 +3,26 @@
  * Model: openai/text-embedding-3-small (1536 dimensions)
  */
 
-// Environment variables (required)
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY
-const OPENROUTER_SITE_URL = process.env.OPENROUTER_SITE_URL || 'https://www.hebelki.de'
-const OPENROUTER_SITE_NAME = process.env.OPENROUTER_SITE_NAME || 'Hebelki'
-
-// Validate API key is present
-if (!OPENROUTER_API_KEY) {
-  throw new Error(
-    'OPENROUTER_API_KEY environment variable is required. ' +
-      'Please add it to .env.local'
-  )
+function getApiKey(): string {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) {
+    throw new Error(
+      'OPENROUTER_API_KEY environment variable is required. ' +
+        'Please add it to .env.local'
+    )
+  }
+  return apiKey
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const OPENROUTER_SITE_URL = process.env.OPENROUTER_SITE_URL || 'https://www.hebelki.de'
+  const OPENROUTER_SITE_NAME = process.env.OPENROUTER_SITE_NAME || 'Hebelki'
+
   try {
     const response = await fetch('https://openrouter.ai/api/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${getApiKey()}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': OPENROUTER_SITE_URL,
         'X-Title': OPENROUTER_SITE_NAME,
@@ -46,11 +47,14 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  const OPENROUTER_SITE_URL = process.env.OPENROUTER_SITE_URL || 'https://www.hebelki.de'
+  const OPENROUTER_SITE_NAME = process.env.OPENROUTER_SITE_NAME || 'Hebelki'
+
   try {
     const response = await fetch('https://openrouter.ai/api/v1/embeddings', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${getApiKey()}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': OPENROUTER_SITE_URL,
         'X-Title': OPENROUTER_SITE_NAME,
