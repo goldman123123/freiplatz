@@ -1,0 +1,21 @@
+# Fly.io configuration for Hebelki Documents Worker
+# This is a worker process (no HTTP service)
+
+app = 'hebelki-documents-worker'
+primary_region = 'fra'
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  WORKER_CONCURRENCY = "2"
+  JOB_BATCH_SIZE = "5"
+  JOB_TIMEOUT_MS = "300000"
+
+# NO [http_service] - this is a background worker
+
+[[vm]]
+  memory = '2gb'
+  cpu_kind = 'shared'
+  cpus = 1

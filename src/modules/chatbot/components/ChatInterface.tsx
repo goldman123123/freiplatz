@@ -6,11 +6,12 @@
  * Used for public chat pages and embedded widgets
  */
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card } from '@/components/ui/card'
 import { Loader2, Send, Bot, User } from 'lucide-react'
+import { VoiceRecorder } from './VoiceRecorder'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -129,6 +130,11 @@ export function ChatInterface({
       sendMessage()
     }
   }
+
+  // Handle transcription from voice recorder
+  const handleTranscription = useCallback((text: string) => {
+    setInput(text)
+  }, [])
 
   const handleEscalate = async () => {
     if (!conversationId) {
@@ -269,6 +275,12 @@ export function ChatInterface({
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             disabled={isLoading}
+          />
+          <VoiceRecorder
+            businessId={businessId}
+            onTranscription={handleTranscription}
+            disabled={isLoading}
+            primaryColor={primaryColor}
           />
           <Button
             onClick={sendMessage}
