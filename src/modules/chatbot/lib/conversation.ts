@@ -814,7 +814,10 @@ export async function handleChatMessage(params: {
 
           // Missing if undefined or null
           if (value === undefined || value === null) {
-            missing.push(key)
+            // Skip businessId - we inject it server-side (line 867)
+            if (key !== 'businessId') {
+              missing.push(key)
+            }
             continue
           }
 

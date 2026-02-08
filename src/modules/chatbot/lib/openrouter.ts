@@ -74,7 +74,7 @@ export async function createChatCompletion(
     throw new Error('OPENROUTER_API_KEY not configured')
   }
 
-  const model = options.model || process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash-lite'
+  const model = options.model || process.env.OPENROUTER_MODEL || 'openai/gpt-4o-2024-08-06'
 
   console.log('🤖 [OPENROUTER] Making API request...')
   console.log('📊 [OPENROUTER] Model:', model)
