@@ -1,21 +1,55 @@
 /**
  * WhatsApp Webhook Receiver
  *
- * Receives messages from Twilio, processes through chatbot, sends reply
+ * Receives messages from Twilio, routes by TO phone number (BYOT),
+ * processes through chatbot, sends reply.
+ *
+ * Flow:
+ * 1. Parse form data (before validation — need TO number first)
+ * 2. Look up business by TO phone number
+ * 3. Validate signature with that business's auth token
+ * 4. Find or create customer (direct DB, no self-fetch)
+ * 5. Compliance check (STOP/START keywords)
+ * 6. Forward to chatbot
+ * 7. Send reply via per-tenant Twilio client
  *
  * POST /api/whatsapp/webhook
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { validateTwilioWebhook, sendWhatsAppMessage } from '@/lib/twilio-client'
+import { validateTwilioWebhook, sendWhatsAppMessage, getTwilioCredentials } from '@/lib/twilio-client'
+import { findOrCreateWhatsAppCustomer } from '@/lib/whatsapp-customer'
 import { formatE164Phone } from '@/lib/whatsapp-phone-formatter'
 import { db } from '@/lib/db'
-import { businesses } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { businesses, customers } from '@/lib/db/schema'
+import { eq, sql } from 'drizzle-orm'
+
+// STOP/START keywords for WhatsApp compliance (case-insensitive)
+const STOP_KEYWORDS = ['stop', 'unsubscribe', 'cancel', 'end', 'quit', 'stopp', 'abmelden']
+const START_KEYWORDS = ['start', 'subscribe', 'anmelden']
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. SECURITY: Verify Twilio signature
+    // 1. PARSE: Extract data from Twilio (before validation — need TO number)
+    const formData = await request.formData()
+    const params: Record<string, any> = {}
+    formData.forEach((value, key) => {
+      params[key] = value
+    })
+
+    const from = params.From as string           // "whatsapp:+4915123456789"
+    const to = params.To as string               // "whatsapp:+14155238886"
+    const body = (params.Body as string || '').trim()
+    const messageSid = params.MessageSid as string
+
+    console.log('[WhatsApp Webhook] Received:', {
+      from,
+      to,
+      messageSid,
+      bodyPreview: body.slice(0, 50),
+    })
+
+    // 2. SECURITY: Verify Twilio signature
     const signature = request.headers.get('X-Twilio-Signature') || request.headers.get('x-twilio-signature')
 
     if (!signature) {
@@ -23,170 +57,160 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing signature' }, { status: 403 })
     }
 
-    // Get full URL for signature verification
-    const url = request.url
+    // 3. ROUTE: Find business by TO phone number
+    const toPhone = formatE164Phone(to)
+    let businessRow = await findBusinessByWhatsAppNumber(toPhone)
 
-    // Parse FormData (Twilio sends application/x-www-form-urlencoded)
-    const formData = await request.formData()
-    const params: Record<string, any> = {}
-    formData.forEach((value, key) => {
-      params[key] = value
-    })
-
-    // Verify signature
-    const isValid = validateTwilioWebhook(
-      process.env.TWILIO_AUTH_TOKEN!,
-      signature,
-      url,
-      params
-    )
-
-    if (!isValid) {
-      console.error('[WhatsApp Webhook] Invalid Twilio signature')
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 403 })
-    }
-
-    // 2. PARSE: Extract data from Twilio webhook
-    const from = params.From as string           // "whatsapp:+5926964488"
-    const to = params.To as string               // "whatsapp:+14155238886"
-    const body = params.Body as string           // User message
-    const messageSid = params.MessageSid as string
-
-    console.log('[WhatsApp Webhook] Received message:', {
-      from,
-      to,
-      messageSid,
-      bodyPreview: body.slice(0, 50)
-    })
-
-    // 3. PHONE NORMALIZATION: Extract phone number
-    const phoneNumber = formatE164Phone(from)  // Remove "whatsapp:" and normalize
-
-    // 4. BUSINESS ROUTING: Extract business slug from message
-    // Format: "DEMO Hello, I want to book" → business=demo, message="Hello, I want to book"
-    // Or default to "demo" business for testing
-    let businessSlug = 'demo'
+    // Fallback: try prefix routing for sandbox testing ("SLUG message")
     let message = body
-
-    const match = body.match(/^([A-Z]+)\s+(.+)$/i)
-    if (match) {
-      businessSlug = match[1].toLowerCase()
-      message = match[2]
+    if (!businessRow) {
+      const match = body.match(/^([A-Z]+)\s+(.+)$/i)
+      if (match) {
+        const slug = match[1].toLowerCase()
+        message = match[2]
+        businessRow = await db
+          .select({ id: businesses.id, slug: businesses.slug, settings: businesses.settings })
+          .from(businesses)
+          .where(eq(businesses.slug, slug))
+          .limit(1)
+          .then(rows => rows[0])
+      }
     }
 
-    // 5. FIND CUSTOMER: Check if customer exists or create new one
-    const customerResponse = await fetch(
-      `${request.nextUrl.origin}/api/whatsapp/customer?phone=${encodeURIComponent(phoneNumber)}&business=${businessSlug}`,
-      { method: 'GET' }
-    )
-
-    let customerId: string
-    let businessId: string
-
-    if (customerResponse.ok) {
-      const customerData = await customerResponse.json()
-      customerId = customerData.customerId
-      businessId = customerData.businessId
-    } else {
-      // Customer not found, create new one
-      const business = await db
-        .select({ id: businesses.id })
-        .from(businesses)
-        .where(eq(businesses.slug, businessSlug))
-        .limit(1)
-        .then(rows => rows[0])
-
-      if (!business) {
-        console.error(`[WhatsApp Webhook] Business not found: ${businessSlug}`)
-
-        // Send user-friendly error message
-        await sendWhatsAppMessage({
-          to: from,
-          body: `Entschuldigung, das Unternehmen "${businessSlug}" wurde nicht gefunden. Bitte überprüfen Sie Ihre Nachricht.`
-        })
-
-        return NextResponse.json({ error: 'Business not found' }, { status: 404 })
-      }
-
-      const createCustomerResponse = await fetch(
-        `${request.nextUrl.origin}/api/whatsapp/customer`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            phone: phoneNumber,
-            businessId: business.id,
-            name: 'WhatsApp Customer'
-          })
-        }
-      )
-
-      if (!createCustomerResponse.ok) {
-        console.error('[WhatsApp Webhook] Failed to create customer')
-        return NextResponse.json({ error: 'Failed to create customer' }, { status: 500 })
-      }
-
-      const newCustomer = await createCustomerResponse.json()
-      customerId = newCustomer.customerId
-      businessId = newCustomer.businessId
-    }
-
-    // 6. CHATBOT: Send message to chatbot API
-    const chatbotResponse = await fetch(
-      `${request.nextUrl.origin}/api/chatbot/message`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          businessId,
-          customerId,
-          message,
-          channel: 'whatsapp'
-        })
-      }
-    )
-
-    if (!chatbotResponse.ok) {
-      console.error('[WhatsApp Webhook] Chatbot API error:', await chatbotResponse.text())
-
-      // Send error message to customer
+    if (!businessRow) {
+      console.error('[WhatsApp Webhook] No business found for TO number:', toPhone)
+      // Use global credentials for error reply
       await sendWhatsAppMessage({
         to: from,
-        body: 'Entschuldigung, es gab einen technischen Fehler. Bitte versuchen Sie es später erneut.'
+        body: 'Entschuldigung, diese Nummer ist keinem Unternehmen zugeordnet.',
       })
+      return NextResponse.json({ error: 'Business not found' }, { status: 200 })
+    }
 
-      return NextResponse.json({ error: 'Chatbot error' }, { status: 500 })
+    const businessId = businessRow.id
+
+    // 4. VALIDATE SIGNATURE: Use business's auth token
+    const creds = await getTwilioCredentials(businessId)
+    // Use canonical webhook URL (Vercel proxy mismatch fix)
+    const webhookUrl = process.env.TWILIO_WEBHOOK_URL || request.url
+
+    const isValid = validateTwilioWebhook(creds.authToken, signature, webhookUrl, params)
+
+    if (!isValid) {
+      // Also try global auth token (sandbox may use global)
+      const globalToken = process.env.TWILIO_AUTH_TOKEN || ''
+      const isValidGlobal = validateTwilioWebhook(globalToken, signature, webhookUrl, params)
+
+      if (!isValidGlobal) {
+        console.error('[WhatsApp Webhook] Invalid Twilio signature')
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 403 })
+      }
+    }
+
+    // 5. PHONE NORMALIZATION
+    const phoneNumber = formatE164Phone(from)
+
+    // 6. COMPLIANCE: Handle STOP/START keywords
+    const bodyLower = body.toLowerCase().trim()
+
+    if (STOP_KEYWORDS.includes(bodyLower)) {
+      // Update customer opt-out status
+      await db
+        .update(customers)
+        .set({ whatsappOptInStatus: 'OPTED_OUT', whatsappOptOutAt: new Date() })
+        .where(eq(customers.phone, phoneNumber))
+
+      // Twilio handles STOP automatically, but we record it
+      console.log('[WhatsApp Webhook] Customer opted out:', phoneNumber)
+      return NextResponse.json({ success: true, action: 'opted_out' })
+    }
+
+    if (START_KEYWORDS.includes(bodyLower)) {
+      await db
+        .update(customers)
+        .set({ whatsappOptInStatus: 'OPTED_IN', whatsappOptInAt: new Date() })
+        .where(eq(customers.phone, phoneNumber))
+
+      console.log('[WhatsApp Webhook] Customer opted in:', phoneNumber)
+
+      await sendWhatsAppMessage(
+        { to: from, body: 'Willkommen zurück! Sie erhalten wieder Nachrichten von uns.' },
+        businessId
+      )
+      return NextResponse.json({ success: true, action: 'opted_in' })
+    }
+
+    // 7. FIND/CREATE CUSTOMER (direct DB, no self-fetch)
+    const { customerId } = await findOrCreateWhatsAppCustomer(phoneNumber, businessId)
+
+    // 8. CHATBOT: Forward to chatbot API
+    const chatbotUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://www.hebelki.de'}/api/chatbot/message`
+
+    const chatbotResponse = await fetch(chatbotUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        businessId,
+        customerId,
+        message,
+        channel: 'whatsapp',
+      }),
+    })
+
+    if (!chatbotResponse.ok) {
+      console.error('[WhatsApp Webhook] Chatbot error:', await chatbotResponse.text())
+      await sendWhatsAppMessage(
+        { to: from, body: 'Entschuldigung, es gab einen technischen Fehler. Bitte versuchen Sie es später erneut.' },
+        businessId
+      )
+      return NextResponse.json({ error: 'Chatbot error' }, { status: 200 })
     }
 
     const chatbotData = await chatbotResponse.json()
     const reply = chatbotData.response
 
-    // 7. SEND REPLY: Send chatbot response back via WhatsApp
-    const sendResult = await sendWhatsAppMessage({
-      to: from,  // Reply to sender
-      body: reply
-    })
+    // 9. SEND REPLY via per-tenant Twilio client
+    const sendResult = await sendWhatsAppMessage(
+      { to: from, body: reply },
+      businessId
+    )
 
     if (!sendResult.success) {
       console.error('[WhatsApp Webhook] Failed to send reply:', sendResult.error)
-      return NextResponse.json({ error: 'Failed to send reply' }, { status: 500 })
+      return NextResponse.json({ error: 'Failed to send reply' }, { status: 200 })
     }
 
     console.log('[WhatsApp Webhook] Success:', {
+      business: businessRow.slug,
       customerId,
-      messageSid: sendResult.sid
+      messageSid: sendResult.sid,
     })
 
-    // 8. RESPOND: Send 200 OK to Twilio (required to prevent retries)
+    // Always return 200 to Twilio
     return NextResponse.json({ success: true, messageSid: sendResult.sid })
 
   } catch (error: any) {
     console.error('[WhatsApp Webhook] Error:', error)
-
-    // Always return 200 to Twilio to prevent retries on our errors
     return NextResponse.json(
       { error: 'Internal error', details: error.message },
-      { status: 200 }
+      { status: 200 } // Always 200 for Twilio
     )
   }
+}
+
+/**
+ * Look up business by WhatsApp phone number stored in settings JSONB.
+ */
+async function findBusinessByWhatsAppNumber(phone: string) {
+  const results = await db
+    .select({
+      id: businesses.id,
+      slug: businesses.slug,
+      settings: businesses.settings,
+    })
+    .from(businesses)
+    .where(sql`${businesses.settings}->>'twilioWhatsappNumber' = ${phone}`)
+    .limit(1)
+
+  return results[0] || null
 }

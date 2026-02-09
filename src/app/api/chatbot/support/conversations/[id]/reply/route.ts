@@ -12,8 +12,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth, clerkClient } from '@clerk/nextjs/server'
 import { requireBusinessAuth } from '@/lib/auth'
 import { db } from '@/lib/db'
-import { chatbotConversations, chatbotMessages } from '@/lib/db/schema'
+import { chatbotConversations, chatbotMessages, customers } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { sendWhatsAppMessage } from '@/lib/twilio-client'
+import { formatTwilioWhatsAppNumber } from '@/lib/whatsapp-phone-formatter'
 
 export async function POST(
   request: NextRequest,
@@ -87,6 +89,31 @@ export async function POST(
       .update(chatbotConversations)
       .set(updates)
       .where(eq(chatbotConversations.id, conversationId))
+
+    // Relay to WhatsApp if this is a WhatsApp conversation
+    if (conversation.channel === 'whatsapp' && conversation.customerId) {
+      try {
+        const customer = await db
+          .select({ phone: customers.phone })
+          .from(customers)
+          .where(eq(customers.id, conversation.customerId))
+          .limit(1)
+          .then(rows => rows[0])
+
+        if (customer?.phone) {
+          await sendWhatsAppMessage(
+            {
+              to: formatTwilioWhatsAppNumber(customer.phone),
+              body: message.trim(),
+            },
+            authResult.business.id
+          )
+        }
+      } catch (whatsappError) {
+        // Log but don't fail the HTTP response — message is saved in DB regardless
+        console.error('[Support Reply] WhatsApp relay failed:', whatsappError)
+      }
+    }
 
     return NextResponse.json({
       success: true,

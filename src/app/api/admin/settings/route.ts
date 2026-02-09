@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { businesses } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
+import { encrypt } from '@/lib/crypto'
 
 // Profile section (basic business info)
 const profileSchema = z.object({
@@ -86,6 +87,14 @@ const avvSchema = z.object({
   userId: z.string().optional(), // Clerk user ID for audit trail
 })
 
+// WhatsApp / Twilio BYOT settings
+const whatsappSchema = z.object({
+  twilioAccountSid: z.string().regex(/^AC[a-f0-9]{32}$/).optional().or(z.literal('')),
+  twilioAuthToken: z.string().min(32).max(64).optional().or(z.literal('')),
+  twilioWhatsappNumber: z.string().regex(/^\+[1-9]\d{7,14}$/).optional().or(z.literal('')),
+  whatsappEnabled: z.boolean().optional(),
+})
+
 // Legacy schemas for backwards compatibility
 const businessInfoSchema = z.object({
   name: z.string().min(2).max(100).optional(),
@@ -95,13 +104,33 @@ const businessInfoSchema = z.object({
   primaryColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a valid hex color').optional(),
 })
 
+/**
+ * Mask WhatsApp credentials before sending to frontend.
+ * Never expose encrypted auth token to the client.
+ */
+function maskWhatsAppCredentials(business: typeof businesses.$inferSelect) {
+  const settings = (business.settings as Record<string, unknown>) || {}
+  const masked = { ...settings }
+
+  // Remove encrypted token, replace with mask + flag
+  if (masked.twilioAuthTokenEncrypted) {
+    delete masked.twilioAuthTokenEncrypted
+    masked.twilioAuthToken = '••••••••'
+    masked.hasTwilioAuthToken = true
+  } else {
+    masked.hasTwilioAuthToken = false
+  }
+
+  return { ...business, settings: masked }
+}
+
 export async function GET() {
   const authResult = await requireBusinessAuth()
   if (!authResult.success) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status })
   }
 
-  return NextResponse.json({ business: authResult.business })
+  return NextResponse.json({ business: maskWhatsAppCredentials(authResult.business) })
 }
 
 export async function PATCH(request: NextRequest) {
@@ -144,6 +173,9 @@ export async function PATCH(request: NextRequest) {
       break
     case 'avv':
       parsed = avvSchema.safeParse(body.data)
+      break
+    case 'whatsapp':
+      parsed = whatsappSchema.safeParse(body.data)
       break
     // Legacy section name for backwards compatibility
     case 'business':
@@ -269,6 +301,52 @@ export async function PATCH(request: NextRequest) {
       .returning()
 
     return NextResponse.json({ business: updated })
+  }
+
+  // Handle WhatsApp / Twilio BYOT settings
+  if (section === 'whatsapp') {
+    const whatsappData = parsed.data as z.infer<typeof whatsappSchema>
+    const currentSettings = (authResult.business.settings as Record<string, unknown>) || {}
+
+    const newSettings: Record<string, unknown> = {
+      ...currentSettings,
+      whatsappEnabled: whatsappData.whatsappEnabled ?? currentSettings.whatsappEnabled ?? false,
+    }
+
+    // Only update SID if provided
+    if (whatsappData.twilioAccountSid !== undefined) {
+      newSettings.twilioAccountSid = whatsappData.twilioAccountSid || null
+    }
+
+    // Only update phone if provided
+    if (whatsappData.twilioWhatsappNumber !== undefined) {
+      newSettings.twilioWhatsappNumber = whatsappData.twilioWhatsappNumber || null
+    }
+
+    // Encrypt auth token before storing (only if a new value is provided)
+    if (whatsappData.twilioAuthToken) {
+      newSettings.twilioAuthTokenEncrypted = encrypt(whatsappData.twilioAuthToken)
+      // Clear verified status when credentials change
+      newSettings.twilioVerifiedAt = null
+      newSettings.twilioVerifiedBy = null
+    }
+
+    // Also clear verified status if SID changes
+    if (whatsappData.twilioAccountSid && whatsappData.twilioAccountSid !== currentSettings.twilioAccountSid) {
+      newSettings.twilioVerifiedAt = null
+      newSettings.twilioVerifiedBy = null
+    }
+
+    const [updated] = await db
+      .update(businesses)
+      .set({
+        settings: newSettings,
+        updatedAt: new Date(),
+      })
+      .where(eq(businesses.id, authResult.business.id))
+      .returning()
+
+    return NextResponse.json({ business: maskWhatsAppCredentials(updated) })
   }
 
   // Handle empty strings as null for nullable fields

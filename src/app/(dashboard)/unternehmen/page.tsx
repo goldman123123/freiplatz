@@ -10,7 +10,7 @@ import { FormInput, FormTextarea, FormCheckbox } from '@/components/forms/FormFi
 import {
   Building2, FileText, Phone, Mail, MapPin, Globe, Pencil, Loader2,
   Shield, Bot, AlertTriangle, CheckCircle, ExternalLink, Info, Clock, Coins,
-  XCircle, Copy, Check
+  XCircle, Copy, Check, MessageCircle
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -26,6 +26,14 @@ interface BusinessSettings {
   avvAcceptedAt?: string
   avvAcceptedBy?: string
   avvVersion?: string
+  // WhatsApp BYOT
+  twilioAccountSid?: string
+  twilioAuthToken?: string
+  hasTwilioAuthToken?: boolean
+  twilioWhatsappNumber?: string
+  whatsappEnabled?: boolean
+  twilioVerifiedAt?: string
+  twilioVerifiedBy?: string
 }
 
 interface Business {
@@ -59,6 +67,16 @@ export default function UnternehmenPage() {
   const [editSection, setEditSection] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [whatsappCopied, setWhatsappCopied] = useState(false)
+  const [testingConnection, setTestingConnection] = useState(false)
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  const [whatsappForm, setWhatsappForm] = useState({
+    twilioAccountSid: '',
+    twilioAuthToken: '',
+    twilioWhatsappNumber: '',
+    whatsappEnabled: false,
+  })
 
   const [profileForm, setProfileForm] = useState({
     name: '',
@@ -140,6 +158,12 @@ export default function UnternehmenPage() {
         aiDisclosureMessage: business.settings?.aiDisclosureMessage ||
           'Ich bin ein KI-Assistent. Für persönliche Beratung wenden Sie sich bitte an unser Team.',
       })
+      setWhatsappForm({
+        twilioAccountSid: business.settings?.twilioAccountSid || '',
+        twilioAuthToken: '', // Never pre-fill — token is masked on server
+        twilioWhatsappNumber: business.settings?.twilioWhatsappNumber || '',
+        whatsappEnabled: business.settings?.whatsappEnabled || false,
+      })
     }
   }, [business])
 
@@ -165,6 +189,31 @@ export default function UnternehmenPage() {
       navigator.clipboard.writeText(`https://hebelki.de/book/${business.slug}`)
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
+    }
+  }
+
+  function copyWebhookUrl() {
+    navigator.clipboard.writeText('https://www.hebelki.de/api/whatsapp/webhook')
+    setWhatsappCopied(true)
+    setTimeout(() => setWhatsappCopied(false), 2000)
+  }
+
+  async function testWhatsAppConnection() {
+    setTestingConnection(true)
+    setTestResult(null)
+    try {
+      const res = await fetch('/api/admin/whatsapp/test', { method: 'POST' })
+      const data = await res.json()
+      if (data.success) {
+        setTestResult({ success: true, message: `Verbunden: ${data.accountName} (${data.accountStatus})` })
+        await fetchBusiness() // Refresh to show verified badge
+      } else {
+        setTestResult({ success: false, message: data.error || 'Verbindung fehlgeschlagen' })
+      }
+    } catch {
+      setTestResult({ success: false, message: 'Netzwerkfehler' })
+    } finally {
+      setTestingConnection(false)
     }
   }
 
@@ -691,6 +740,107 @@ export default function UnternehmenPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* WhatsApp Integration - Full Width */}
+        <Card className="lg:col-span-2">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <MessageCircle className="h-5 w-5" />
+                WhatsApp-Integration
+              </CardTitle>
+              <CardDescription>Twilio-Zugangsdaten für WhatsApp-Chatbot und Live-Chat</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setEditSection('whatsapp')}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-6 md:grid-cols-3">
+              {/* Status */}
+              <div className="space-y-3">
+                <h4 className="font-semibold text-gray-700">Status</h4>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">WhatsApp</label>
+                  {business.settings?.whatsappEnabled ? (
+                    <p className="mt-1 flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-4 w-4" />
+                      Aktiviert
+                    </p>
+                  ) : (
+                    <p className="mt-1 flex items-center gap-2 text-gray-500 text-sm">
+                      <XCircle className="h-4 w-4" />
+                      Deaktiviert
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Verbindung</label>
+                  {business.settings?.twilioVerifiedAt ? (
+                    <p className="mt-1 flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-4 w-4" />
+                      Verifiziert
+                    </p>
+                  ) : business.settings?.hasTwilioAuthToken ? (
+                    <p className="mt-1 flex items-center gap-2 text-amber-600 text-sm">
+                      <AlertTriangle className="h-4 w-4" />
+                      Nicht getestet
+                    </p>
+                  ) : (
+                    <p className="mt-1 flex items-center gap-2 text-gray-400 text-sm">
+                      <XCircle className="h-4 w-4" />
+                      Nicht konfiguriert
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Credentials */}
+              <div className="space-y-3">
+                <h4 className="font-semibold text-gray-700">Zugangsdaten</h4>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Account SID</label>
+                  {business.settings?.twilioAccountSid ? (
+                    <p className="mt-1 font-mono text-sm">
+                      {business.settings.twilioAccountSid.slice(0, 6)}...{business.settings.twilioAccountSid.slice(-4)}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-sm text-gray-400">Nicht konfiguriert</p>
+                  )}
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Auth Token</label>
+                  <p className="mt-1 text-sm">
+                    {business.settings?.hasTwilioAuthToken ? '••••••••' : 'Nicht konfiguriert'}
+                  </p>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">WhatsApp-Nummer</label>
+                  <p className="mt-1 text-sm">
+                    {business.settings?.twilioWhatsappNumber || 'Nicht konfiguriert'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Webhook */}
+              <div className="space-y-3">
+                <h4 className="font-semibold text-gray-700">Webhook</h4>
+                <div>
+                  <label className="text-sm font-medium text-gray-500">Webhook-URL</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <code className="flex-1 rounded bg-gray-100 px-2 py-1 text-xs break-all">
+                      https://www.hebelki.de/api/whatsapp/webhook
+                    </code>
+                    <Button variant="outline" size="sm" onClick={copyWebhookUrl}>
+                      {whatsappCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                    </Button>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-400">In Twilio-Konsole eintragen</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Profile Edit Dialog */}
@@ -1009,6 +1159,126 @@ export default function UnternehmenPage() {
               </Link>
             </div>
           </div>
+        </div>
+      </FormDialog>
+
+      {/* WhatsApp Edit Dialog */}
+      <FormDialog
+        open={editSection === 'whatsapp'}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditSection(null)
+            setTestResult(null)
+          }
+        }}
+        title="WhatsApp-Integration (Twilio)"
+        onSubmit={async () => {
+          const data: Record<string, unknown> = {
+            whatsappEnabled: whatsappForm.whatsappEnabled,
+            twilioAccountSid: whatsappForm.twilioAccountSid,
+            twilioWhatsappNumber: whatsappForm.twilioWhatsappNumber,
+          }
+          // Only send auth token if user typed a new one
+          if (whatsappForm.twilioAuthToken) {
+            data.twilioAuthToken = whatsappForm.twilioAuthToken
+          }
+          await handleSave('whatsapp', data)
+        }}
+        isSubmitting={isSaving}
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 rounded-md border p-3">
+            <input
+              type="checkbox"
+              id="whatsappEnabled"
+              checked={whatsappForm.whatsappEnabled}
+              onChange={(e) => setWhatsappForm({ ...whatsappForm, whatsappEnabled: e.target.checked })}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            <label htmlFor="whatsappEnabled" className="text-sm font-medium">
+              WhatsApp aktivieren
+            </label>
+          </div>
+
+          <FormInput
+            label="Twilio Account SID"
+            name="twilioAccountSid"
+            value={whatsappForm.twilioAccountSid}
+            onChange={(e) => setWhatsappForm({ ...whatsappForm, twilioAccountSid: e.target.value })}
+            placeholder="AC..."
+            description="Beginnt mit AC, 34 Zeichen"
+          />
+
+          <FormInput
+            label="Twilio Auth Token"
+            name="twilioAuthToken"
+            type="password"
+            value={whatsappForm.twilioAuthToken}
+            onChange={(e) => setWhatsappForm({ ...whatsappForm, twilioAuthToken: e.target.value })}
+            placeholder={business.settings?.hasTwilioAuthToken ? '••••••••  (gespeichert, leer lassen um beizubehalten)' : 'Auth Token eingeben'}
+            description={business.settings?.hasTwilioAuthToken
+              ? 'Token ist gespeichert. Nur ausfüllen, um zu ändern.'
+              : 'Aus der Twilio-Konsole kopieren'
+            }
+          />
+
+          <FormInput
+            label="WhatsApp-Nummer (E.164)"
+            name="twilioWhatsappNumber"
+            value={whatsappForm.twilioWhatsappNumber}
+            onChange={(e) => setWhatsappForm({ ...whatsappForm, twilioWhatsappNumber: e.target.value })}
+            placeholder="+4915123456789"
+            description="Format: +Landesvorwahl Nummer (z.B. +49...)"
+          />
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Webhook-URL (nur lesen)</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded bg-gray-100 px-3 py-2 text-sm">
+                https://www.hebelki.de/api/whatsapp/webhook
+              </code>
+              <Button type="button" variant="outline" size="sm" onClick={copyWebhookUrl}>
+                {whatsappCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+          </div>
+
+          <div className="rounded-md border border-blue-200 bg-blue-50 p-3">
+            <p className="text-sm text-blue-700 flex items-center gap-2">
+              <Info className="h-4 w-4 flex-shrink-0" />
+              Tragen Sie die Webhook-URL in Ihrer Twilio-Konsole unter Messaging &rarr; Sandbox Settings ein.
+            </p>
+          </div>
+
+          {/* Connection test button (only if credentials are saved) */}
+          {business.settings?.hasTwilioAuthToken && (
+            <div className="border-t pt-4 space-y-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={testWhatsAppConnection}
+                disabled={testingConnection}
+                className="w-full"
+              >
+                {testingConnection ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Teste Verbindung...
+                  </>
+                ) : (
+                  'Verbindung testen'
+                )}
+              </Button>
+              {testResult && (
+                <div className={`rounded-md p-3 text-sm ${testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                  <p className="flex items-center gap-2">
+                    {testResult.success ? <CheckCircle className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                    {testResult.message}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </FormDialog>
     </div>
