@@ -19,7 +19,7 @@ export async function generatePdfFromHtml(html: string): Promise<Buffer> {
       args: chromium.args,
       defaultViewport: { width: 1200, height: 800 },
       executablePath: await chromium.executablePath(
-        'https://github.com/nichochar/chromium-compact/releases/download/v143.0.0/chromium-v143.0.0-pack.tar'
+        'https://github.com/Sparticuz/chromium/releases/download/v143.0.0/chromium-v143.0.0-pack.x64.tar'
       ),
       headless: true,
     })
