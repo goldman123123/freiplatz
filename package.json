@@ -33,7 +33,7 @@
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
-    "@sparticuz/chromium": "143.0.4",
+    "@sparticuz/chromium-min": "143.0.4",
     "@types/papaparse": "^5.5.2",
     "@types/ws": "^8.18.1",
     "axios": "^1.13.4",

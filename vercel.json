@@ -1,3 +1,25 @@
 {
-  "framework": "nextjs"
+  "framework": "nextjs",
+  "functions": {
+    "src/app/api/invoices/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "src/app/api/invoices/[id]/pdf/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "src/app/api/lieferschein/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "src/app/api/lieferschein/[id]/pdf/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    },
+    "src/app/api/bookings/[id]/invoice/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024
+    }
+  }
 }

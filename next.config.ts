@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   // Externalize Puppeteer/Chromium for serverless PDF generation
-  serverExternalPackages: ['@sparticuz/chromium', 'puppeteer-core', 'puppeteer'],
+  serverExternalPackages: ['@sparticuz/chromium-min', 'puppeteer-core', 'puppeteer'],
 
   // Optimize package imports for faster builds
   experimental: {
