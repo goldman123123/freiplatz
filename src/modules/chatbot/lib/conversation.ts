@@ -162,6 +162,25 @@ Zusammenfassung (auf Deutsch, max 3 Sätze):`
 }
 
 /**
+ * Retry wrapper for DB updates — handles transient Neon HTTP connection drops.
+ * 1 retry after 500ms delay is enough for intermittent socket failures.
+ */
+async function dbUpdateWithRetry(fn: () => Promise<void>, retries = 1): Promise<void> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      await fn()
+      return
+    } catch (err) {
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      throw err
+    }
+  }
+}
+
+/**
  * Update conversation summary if needed
  * Called after each message exchange
  */
@@ -169,13 +188,16 @@ async function updateSummaryIfNeeded(conversationId: string, currentMessageCount
   // Check if we should generate a new summary
   if (currentMessageCount < MEMORY_CONFIG.MESSAGES_BEFORE_SUMMARY) {
     // Just increment the counter
-    await db
-      .update(chatbotConversations)
-      .set({
-        messagesSinceSummary: currentMessageCount,
-        updatedAt: new Date(),
-      })
-      .where(eq(chatbotConversations.id, conversationId))
+    await dbUpdateWithRetry(() =>
+      db
+        .update(chatbotConversations)
+        .set({
+          messagesSinceSummary: currentMessageCount,
+          updatedAt: new Date(),
+        })
+        .where(eq(chatbotConversations.id, conversationId))
+        .then(() => {})
+    )
     return
   }
 
@@ -185,15 +207,18 @@ async function updateSummaryIfNeeded(conversationId: string, currentMessageCount
   const summary = await generateConversationSummary(conversationId)
 
   if (summary) {
-    await db
-      .update(chatbotConversations)
-      .set({
-        summary,
-        summaryUpdatedAt: new Date(),
-        messagesSinceSummary: 0,  // Reset counter
-        updatedAt: new Date(),
-      })
-      .where(eq(chatbotConversations.id, conversationId))
+    await dbUpdateWithRetry(() =>
+      db
+        .update(chatbotConversations)
+        .set({
+          summary,
+          summaryUpdatedAt: new Date(),
+          messagesSinceSummary: 0,  // Reset counter
+          updatedAt: new Date(),
+        })
+        .where(eq(chatbotConversations.id, conversationId))
+        .then(() => {})
+    )
 
     console.log(`[Memory] Summary generated: "${summary.substring(0, 100)}..."`)
   }
